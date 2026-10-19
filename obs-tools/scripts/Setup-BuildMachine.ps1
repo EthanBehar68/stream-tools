@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if (-not $ToolsDir) { $ToolsDir = Join-Path $PSScriptRoot '..\..\tools' }
+if (-not $ToolsDir) { $ToolsDir = Join-Path $PSScriptRoot '..\..\..\tools' }
 $ToolsDir = (Resolve-Path $ToolsDir).Path
 $RepoDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $CMake = Join-Path $ToolsDir 'cmake\bin\cmake.exe'
@@ -50,7 +50,8 @@ if ($HasMsvc) {
 }
 
 $SafeDirs = @(& $Git config --global --get-all safe.directory)
-$RepoGitPath = $RepoDir -replace '\\', '/'
+# The git repository is stream-tools, one level above obs-tools.
+$RepoGitPath = (Resolve-Path (Join-Path $RepoDir '..')).Path -replace '\\', '/'
 if ($SafeDirs -notcontains $RepoGitPath) {
     & $Git config --global --add safe.directory $RepoGitPath
     Write-Host "Marked $RepoGitPath as a safe git directory"

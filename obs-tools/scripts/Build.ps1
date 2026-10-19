@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RepoDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-if (-not $ToolsDir) { $ToolsDir = Join-Path $PSScriptRoot '..\..\tools' }
+if (-not $ToolsDir) { $ToolsDir = Join-Path $PSScriptRoot '..\..\..\tools' }
 $ToolsDir = (Resolve-Path $ToolsDir).Path
 $env:PATH = "$ToolsDir\cmake\bin;$ToolsDir\git\cmd;$env:PATH"
 

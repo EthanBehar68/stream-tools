@@ -6,10 +6,12 @@ Everything needed to build is in the `OBS-Dev` folder on the drive. The only thi
 
 ```
 OBS-Dev\
-├── obs-tools\                 this repository (every plugin)
-│   ├── .deps\                 downloaded OBS 32.2.1 sources, obs-deps and Qt 6 (prebuilt; no internet needed)
-│   ├── build_x64\             CMake build tree (regenerated automatically on a new PC)
-│   └── release\               output of Build.ps1 -Package
+├── stream-tools\              the git repository
+│   ├── obs-tools\             this folder: every OBS plugin
+│   │   ├── .deps\             downloaded OBS 32.2.1 sources, obs-deps and Qt 6 (prebuilt; no internet needed)
+│   │   ├── build_x64\         CMake build tree (regenerated automatically on a new PC)
+│   │   └── release\           output of Build.ps1 -Package
+│   └── clip-tools\            clip and stitch scripts for social media clips (see its README)
 ├── tools\
 │   ├── cmake\                 portable CMake 4.4.3
 │   ├── git\                   portable Git for Windows 2.55
@@ -21,7 +23,7 @@ OBS-Dev\
 ## Moving to another PC (desktop)
 
 1. Plug in the drive, or copy the whole `OBS-Dev` folder to any disk. The drive letter doesn't have to be `D:`.
-2. Open **PowerShell as Administrator** in `OBS-Dev\obs-tools` and run once:
+2. Open **PowerShell as Administrator** in `OBS-Dev\stream-tools\obs-tools` and run once:
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\Setup-BuildMachine.ps1
    ```
