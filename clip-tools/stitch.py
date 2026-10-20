@@ -1,7 +1,8 @@
 """Stitch numbered clips (0, 1, 2, ... N) in a folder into one video.
 
 Usage:
-    python stitch.py <folder> [-o OUTPUT] [-v] [-t NAME] [-d SEC] [-k]
+    python stitch.py <folder> [-o OUTPUT] [-v [-z 1.0-3.0] [-p left|center|right]]
+                     [-t NAME] [-d SEC] [-k]
     python stitch.py -c   (check required software)
     python stitch.py -l   (list transitions)
 """
@@ -19,6 +20,8 @@ MIN_PYTHON = (3, 8)
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".flv", ".ts", ".webm", ".avi", ".m4v"}
 DEFAULT_OUTPUT = "stitched.mp4"
 VERTICAL_W, VERTICAL_H = 1080, 1920
+ZOOM_MIN, ZOOM_MAX = 1.0, 3.0
+POSITIONS = {"left": "0", "center": "(iw-ow)/2", "right": "iw-ow"}
 
 # ffmpeg's xfade transitions. "none" is a hard cut.
 TRANSITIONS = [
@@ -149,7 +152,7 @@ def concat_copy(infos, output):
         os.remove(list_path)
 
 
-def build_filter(infos, vertical, transition, tdur):
+def build_filter(infos, vertical, transition, tdur, zoom=1.0, position="center"):
     """Build the filter graph for re-encoding (crop and/or transitions)."""
     if vertical:
         w, h = VERTICAL_W, VERTICAL_H
@@ -161,12 +164,13 @@ def build_filter(infos, vertical, transition, tdur):
     for i, info in enumerate(infos):
         norm = f"fps={fps},format=yuv420p,setsar=1"
         if vertical:
-            # Full frame centred over a blurred, zoomed copy that fills 9:16.
+            # Gameplay (zoomed, sides trimmed) centred over a blurred copy that fills 9:16.
+            zw = round(w * zoom / 2) * 2
             parts.append(
                 f"[{i}:v]split[bg{i}][fg{i}];"
                 f"[bg{i}]scale={w}:{h}:force_original_aspect_ratio=increase,"
                 f"crop={w}:{h},boxblur=20:2[bgb{i}];"
-                f"[fg{i}]scale={w}:-2[fgs{i}];"
+                f"[fg{i}]scale={zw}:-2,crop={w}:'min(ih,{h})':{POSITIONS[position]}:(ih-oh)/2[fgs{i}];"
                 f"[bgb{i}][fgs{i}]overlay=(W-w)/2:(H-h)/2,{norm}[v{i}]"
             )
         else:
@@ -197,12 +201,12 @@ def build_filter(infos, vertical, transition, tdur):
     return ";".join(parts)
 
 
-def concat_reencode(infos, output, vertical, transition, tdur):
+def concat_reencode(infos, output, vertical, transition, tdur, zoom, position):
     args = []
     for info in infos:
         args += ["-i", info["path"]]
     args += [
-        "-filter_complex", build_filter(infos, vertical, transition, tdur),
+        "-filter_complex", build_filter(infos, vertical, transition, tdur, zoom, position),
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
@@ -269,12 +273,18 @@ def run_ffmpeg(args, total):
 
 def main():
     parser = argparse.ArgumentParser(
+        prog="stitch",
         description="Stitch clips named 0, 1, 2, ... N in a folder into one video.")
     parser.add_argument("folder", nargs="?", help="folder containing the numbered clips")
     parser.add_argument("-o", "--output",
                         help=f"output file (default: {DEFAULT_OUTPUT} in the clip folder)")
     parser.add_argument("-v", "--vertical", action="store_true",
                         help="make a 9:16 (1080x1920) video with a blurred background")
+    parser.add_argument("-z", "--zoom", type=float, default=1.0, metavar="X",
+                        help=f"with -v: enlarge the gameplay {ZOOM_MIN}-{ZOOM_MAX}x, trimming "
+                             "its sides (default: 1.0 = full width)")
+    parser.add_argument("-p", "--position", choices=list(POSITIONS), default="center",
+                        help="with -z: which part of the width to keep (default: center)")
     parser.add_argument("-t", "--transition", default="none", metavar="NAME",
                         help="transition between clips (default: none = hard cut); "
                              "see --list-transitions")
@@ -309,6 +319,10 @@ def main():
         fail(f"folder not found: {args.folder}")
     if args.transition != "none" and args.transition not in TRANSITIONS:
         fail(f"unknown transition '{args.transition}'; see --list-transitions")
+    if not ZOOM_MIN <= args.zoom <= ZOOM_MAX:
+        fail(f"--zoom must be between {ZOOM_MIN} and {ZOOM_MAX}")
+    if not args.vertical and (args.zoom != 1.0 or args.position != "center"):
+        fail("--zoom and --position only work with -v (vertical)")
     if args.transition_duration <= 0:
         fail("--transition-duration must be greater than 0")
 
@@ -341,7 +355,7 @@ def main():
     if needs_reencode:
         print("Re-encoding...")
         code = concat_reencode(infos, output, args.vertical, args.transition,
-                               args.transition_duration)
+                               args.transition_duration, args.zoom, args.position)
     else:
         print("Joining (lossless)...")
         code = concat_copy(infos, output)

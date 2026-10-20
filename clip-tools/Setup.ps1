@@ -1,4 +1,4 @@
-# Adds clip-tools to the user PATH so `clip` and `stitch` work from any folder,
+# Adds clip-tools to the user PATH so `cutclip` and `stitch` work from any folder,
 # and offers to install Python and ffmpeg with winget. No admin needed.
 #   powershell -ExecutionPolicy Bypass -File .\Setup.ps1              install
 #   powershell -ExecutionPolicy Bypass -File .\Setup.ps1 -Uninstall   remove from PATH

@@ -1,8 +1,8 @@
 """Cut numbered clips (0.mp4, 1.mp4, ...) out of a stream recording.
 
-Usage:
-    python clip.py <recording> -f marks.txt [-o FOLDER] [--fast] [-a TRACK]
-    python clip.py <recording> 1:02:10-1:02:45 1:30:00+20 [-o FOLDER]
+Usage (cutclip.bat runs this; Windows already has a clip command):
+    cutclip <recording> -f marks.txt [-o FOLDER] [--fast] [-a TRACK]
+    cutclip <recording> 1:02:10-1:02:45 1:30:00+20 [-o FOLDER]
 
 marks.txt has one range per line, with an optional note after it:
     1:02:10-1:02:45   funny fail
@@ -129,6 +129,7 @@ def cut(recording, start, end, track, fast, output):
 
 def main():
     parser = argparse.ArgumentParser(
+        prog="cutclip",
         description="Cut numbered clips (0.mp4, 1.mp4, ...) out of a stream recording.")
     parser.add_argument("recording", help="the stream recording (e.g. an OBS .mkv)")
     parser.add_argument("ranges", nargs="*", metavar="RANGE",
