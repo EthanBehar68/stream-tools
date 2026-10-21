@@ -1,7 +1,8 @@
 """Stitch numbered clips (0, 1, 2, ... N) in a folder into one video.
 
 Usage:
-    python stitch.py <folder> [-o OUTPUT] [-v [-z 1.0-3.0] [-p left|center|right]]
+    python stitch.py <folder> [-o OUTPUT] [-v [-z 1.0-3.0] [-p left|center|right]
+                     [--cam TL|TC|TR|CL|CR|BL|BC|BR --cam-size WxH]]
                      [-t NAME] [-d SEC] [-k]
     python stitch.py -c   (check required software)
     python stitch.py -l   (list transitions)
@@ -10,6 +11,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +24,9 @@ DEFAULT_OUTPUT = "stitched.mp4"
 VERTICAL_W, VERTICAL_H = 1080, 1920
 ZOOM_MIN, ZOOM_MAX = 1.0, 3.0
 POSITIONS = {"left": "0", "center": "(iw-ow)/2", "right": "iw-ow"}
+# Webcam anchors in the recording: row (T/C/B) + column (L/C/R).
+CAM_ANCHORS = ["TL", "TC", "TR", "CL", "CR", "BL", "BC", "BR"]
+CAM_MAX_BAND = VERTICAL_H // 2  # the webcam band never takes more than half the height
 
 # ffmpeg's xfade transitions. "none" is a hard cut.
 TRANSITIONS = [
@@ -152,7 +157,22 @@ def concat_copy(infos, output):
         os.remove(list_path)
 
 
-def build_filter(infos, vertical, transition, tdur, zoom=1.0, position="center"):
+def cam_box(anchor, cw, ch, width, height):
+    """Webcam crop (x, y) in a width x height frame, flush with the anchor's edges."""
+    row, col = anchor[0], anchor[1]
+    x = {"L": 0, "C": (width - cw) // 2, "R": width - cw}[col]
+    y = {"T": 0, "C": (height - ch) // 2, "B": height - ch}[row]
+    return x, y
+
+
+def cam_band_size(cw, ch):
+    """Webcam scaled to the full output width, capped at half the height."""
+    bh = min(CAM_MAX_BAND, round(VERTICAL_W * ch / cw / 2) * 2)
+    bw = min(VERTICAL_W, round(bh * cw / ch / 2) * 2)
+    return bw, bh
+
+
+def build_filter(infos, vertical, transition, tdur, zoom=1.0, position="center", cam=None):
     """Build the filter graph for re-encoding (crop and/or transitions)."""
     if vertical:
         w, h = VERTICAL_W, VERTICAL_H
@@ -164,15 +184,25 @@ def build_filter(infos, vertical, transition, tdur, zoom=1.0, position="center")
     for i, info in enumerate(infos):
         norm = f"fps={fps},format=yuv420p,setsar=1"
         if vertical:
-            # Gameplay (zoomed, sides trimmed) centred over a blurred copy that fills 9:16.
+            # Gameplay (zoomed, sides trimmed) centred over a blurred copy that fills 9:16;
+            # with --cam, the webcam takes a band at the bottom and the gameplay the rest.
             zw = round(w * zoom / 2) * 2
-            parts.append(
-                f"[{i}:v]split[bg{i}][fg{i}];"
+            band_h = cam_band_size(cam[1], cam[2])[1] if cam else 0
+            top_h = h - band_h
+            graph = (
+                f"[{i}:v]split={3 if cam else 2}[bg{i}][fg{i}]{f'[cm{i}]' if cam else ''};"
                 f"[bg{i}]scale={w}:{h}:force_original_aspect_ratio=increase,"
                 f"crop={w}:{h},boxblur=20:2[bgb{i}];"
-                f"[fg{i}]scale={zw}:-2,crop={w}:'min(ih,{h})':{POSITIONS[position]}:(ih-oh)/2[fgs{i}];"
-                f"[bgb{i}][fgs{i}]overlay=(W-w)/2:(H-h)/2,{norm}[v{i}]"
+                f"[fg{i}]scale={zw}:-2,crop={w}:'min(ih,{top_h})':{POSITIONS[position]}:(ih-oh)/2[fgs{i}];"
+                f"[bgb{i}][fgs{i}]overlay=(W-w)/2:({top_h}-h)/2"
             )
+            if cam:
+                anchor, cw, ch = cam
+                cx, cy = cam_box(anchor, cw, ch, info["width"], info["height"])
+                bw, bh = cam_band_size(cw, ch)
+                graph += (f"[gp{i}];[cm{i}]crop={cw}:{ch}:{cx}:{cy},scale={bw}:{bh}[cms{i}];"
+                          f"[gp{i}][cms{i}]overlay=(W-w)/2:H-h")
+            parts.append(f"{graph},{norm}[v{i}]")
         else:
             parts.append(
                 f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,"
@@ -201,12 +231,12 @@ def build_filter(infos, vertical, transition, tdur, zoom=1.0, position="center")
     return ";".join(parts)
 
 
-def concat_reencode(infos, output, vertical, transition, tdur, zoom, position):
+def concat_reencode(infos, output, vertical, transition, tdur, zoom, position, cam):
     args = []
     for info in infos:
         args += ["-i", info["path"]]
     args += [
-        "-filter_complex", build_filter(infos, vertical, transition, tdur, zoom, position),
+        "-filter_complex", build_filter(infos, vertical, transition, tdur, zoom, position, cam),
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
@@ -285,6 +315,11 @@ def main():
                              "its sides (default: 1.0 = full width)")
     parser.add_argument("-p", "--position", choices=list(POSITIONS), default="center",
                         help="with -z: which part of the width to keep (default: center)")
+    parser.add_argument("--cam", type=str.upper, choices=CAM_ANCHORS, metavar="POS",
+                        help="with -v: where the webcam is in the recording "
+                             "(TL TC TR CL CR BL BC BR); it goes in a band at the bottom")
+    parser.add_argument("--cam-size", metavar="WxH",
+                        help="with --cam: webcam size in the recording, in pixels (e.g. 480x270)")
     parser.add_argument("-t", "--transition", default="none", metavar="NAME",
                         help="transition between clips (default: none = hard cut); "
                              "see --list-transitions")
@@ -323,6 +358,16 @@ def main():
         fail(f"--zoom must be between {ZOOM_MIN} and {ZOOM_MAX}")
     if not args.vertical and (args.zoom != 1.0 or args.position != "center"):
         fail("--zoom and --position only work with -v (vertical)")
+    cam = None
+    if args.cam or args.cam_size:
+        if not (args.cam and args.cam_size):
+            fail("--cam and --cam-size go together (e.g. --cam BL --cam-size 480x270)")
+        if not args.vertical:
+            fail("--cam only works with -v (vertical)")
+        m = re.fullmatch(r"(\d+)[xX](\d+)", args.cam_size)
+        if not m or int(m.group(1)) < 16 or int(m.group(2)) < 16:
+            fail(f"--cam-size must look like 480x270, got '{args.cam_size}'")
+        cam = (args.cam, int(m.group(1)), int(m.group(2)))
     if args.transition_duration <= 0:
         fail("--transition-duration must be greater than 0")
 
@@ -335,6 +380,11 @@ def main():
     print(f"Found {len(clips)} clip(s): "
           + ", ".join(os.path.basename(c) for c in clips))
     infos = [probe(c) for c in clips]
+    if cam:
+        for info in infos:
+            if cam[1] > info["width"] or cam[2] > info["height"]:
+                fail(f"--cam-size {cam[1]}x{cam[2]} is bigger than "
+                     f"{os.path.basename(info['path'])} ({info['width']}x{info['height']})")
 
     if args.transition != "none":
         shortest = min(i["duration"] for i in infos)
@@ -355,7 +405,7 @@ def main():
     if needs_reencode:
         print("Re-encoding...")
         code = concat_reencode(infos, output, args.vertical, args.transition,
-                               args.transition_duration, args.zoom, args.position)
+                               args.transition_duration, args.zoom, args.position, cam)
     else:
         print("Joining (lossless)...")
         code = concat_copy(infos, output)
