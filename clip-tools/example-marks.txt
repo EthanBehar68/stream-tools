@@ -1,0 +1,13 @@
+# Example marks file for cutclip. Copy it next to your recording and edit it.
+#   cutclip D:\rec\stream.mkv -f D:\rec\marks.txt -o D:\clips
+#
+# One clip per line: START-END or START+SECONDS, then an optional note.
+# Times: H:MM:SS, M:SS, plain seconds, or with decimals (1:02:10.5).
+# Clips are numbered 0, 1, 2, ... in the order of the lines here,
+# and stitch joins them in that order.
+# Blank lines and lines starting with # are ignored.
+
+1:02:10-1:02:45      funny fail
+1:30:00+20           clutch win (20 seconds from 1:30:00)
+1:45:12.5-1:45:30    ends on the kill
+2:10:05 - 2:10:40    spaces around the dash are fine

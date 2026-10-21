@@ -12,7 +12,7 @@ It adds this folder to your user PATH (no admin) and offers to install Python an
 Re-run it if the drive letter changes. To remove it from PATH: `.\Setup.ps1 -Uninstall`.
 
 ## Cut clips
-Write the timestamps in a text file, one range per line, with an optional note:
+Write the timestamps in a text file, one range per line, with an optional note ([example-marks.txt](example-marks.txt) is a template):
 ```
 1:02:10-1:02:45   funny fail
 1:30:00+20        clutch win (start + length in seconds)
