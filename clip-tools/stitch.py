@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -172,6 +173,22 @@ def cam_band_size(cw, ch):
     return bw, bh
 
 
+def zoom_past_cam(anchor, cw, width):
+    """Smallest zoom (and side to keep) that leaves the webcam out of the gameplay.
+
+    The gameplay shows width/zoom of the source width, so for a webcam at the
+    left or right edge, zoom = width / (width - cw). A centred webcam needs the
+    gameplay to fit in one side of it: zoom = 2 * width / (width - cw).
+    Returns (zoom, side or None if the side is the caller's choice).
+    """
+    if anchor[1] == "C":
+        need, side = 2 * width / (width - cw), None
+    else:
+        need, side = width / (width - cw), "right" if anchor[1] == "L" else "left"
+    # A small margin so rounding never leaves a sliver of the webcam's edge.
+    return math.ceil(need * 1.01 * 100) / 100, side
+
+
 def build_filter(infos, vertical, transition, tdur, zoom=1.0, position="center", cam=None):
     """Build the filter graph for re-encoding (crop and/or transitions)."""
     if vertical:
@@ -310,11 +327,13 @@ def main():
                         help=f"output file (default: {DEFAULT_OUTPUT} in the clip folder)")
     parser.add_argument("-v", "--vertical", action="store_true",
                         help="make a 9:16 (1080x1920) video with a blurred background")
-    parser.add_argument("-z", "--zoom", type=float, default=1.0, metavar="X",
+    parser.add_argument("-z", "--zoom", default="1.0", metavar="X",
                         help=f"with -v: enlarge the gameplay {ZOOM_MIN}-{ZOOM_MAX}x, trimming "
-                             "its sides (default: 1.0 = full width)")
-    parser.add_argument("-p", "--position", choices=list(POSITIONS), default="center",
-                        help="with -z: which part of the width to keep (default: center)")
+                             "its sides (default: 1.0 = full width); 'wc' = just enough "
+                             "to leave the webcam (--cam) out of the gameplay")
+    parser.add_argument("-p", "--position", choices=list(POSITIONS),
+                        help="with -z: which part of the width to keep (default: center; "
+                             "with -z wc it's automatic, or left/right for a TC/BC webcam)")
     parser.add_argument("--cam", type=str.upper, choices=CAM_ANCHORS, metavar="POS",
                         help="with -v: where the webcam is in the recording "
                              "(TL TC TR CL CR BL BC BR); it goes in a band at the bottom")
@@ -354,9 +373,15 @@ def main():
         fail(f"folder not found: {args.folder}")
     if args.transition != "none" and args.transition not in TRANSITIONS:
         fail(f"unknown transition '{args.transition}'; see --list-transitions")
-    if not ZOOM_MIN <= args.zoom <= ZOOM_MAX:
-        fail(f"--zoom must be between {ZOOM_MIN} and {ZOOM_MAX}")
-    if not args.vertical and (args.zoom != 1.0 or args.position != "center"):
+    zoom_wc = args.zoom.lower() == "wc"
+    if not zoom_wc:
+        try:
+            args.zoom = float(args.zoom)
+        except ValueError:
+            fail(f"--zoom must be a number from {ZOOM_MIN} to {ZOOM_MAX}, or wc")
+        if not ZOOM_MIN <= args.zoom <= ZOOM_MAX:
+            fail(f"--zoom must be between {ZOOM_MIN} and {ZOOM_MAX}")
+    if not args.vertical and (zoom_wc or args.zoom != 1.0 or args.position):
         fail("--zoom and --position only work with -v (vertical)")
     cam = None
     if args.cam or args.cam_size:
@@ -368,6 +393,8 @@ def main():
         if not m or int(m.group(1)) < 16 or int(m.group(2)) < 16:
             fail(f"--cam-size must look like 480x270, got '{args.cam_size}'")
         cam = (args.cam, int(m.group(1)), int(m.group(2)))
+    if zoom_wc and not cam:
+        fail("-z wc needs --cam and --cam-size, so it knows where the webcam is")
     if args.transition_duration <= 0:
         fail("--transition-duration must be greater than 0")
 
@@ -385,6 +412,21 @@ def main():
             if cam[1] > info["width"] or cam[2] > info["height"]:
                 fail(f"--cam-size {cam[1]}x{cam[2]} is bigger than "
                      f"{os.path.basename(info['path'])} ({info['width']}x{info['height']})")
+    if zoom_wc:
+        anchor, cw = cam[0], cam[1]
+        args.zoom, side = zoom_past_cam(anchor, cw, infos[0]["width"])
+        if side and args.position:
+            fail(f"-p is chosen automatically with -z wc for a {anchor} webcam "
+                 "(-p only picks the side for TC/BC)")
+        if not side and args.position == "center":
+            fail("-p center can't avoid a centred webcam; use -p left or -p right")
+        side = side or args.position or "left"
+        if args.zoom > ZOOM_MAX:
+            fail(f"-z wc would need {args.zoom}x zoom to leave a {cw} px wide {anchor} "
+                 f"webcam out, more than the {ZOOM_MAX} maximum")
+        args.position = side
+        print(f"Zoom wc: {args.zoom}x, keeping the {side} side")
+    args.position = args.position or "center"
 
     if args.transition != "none":
         shortest = min(i["duration"] for i in infos)
